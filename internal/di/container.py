@@ -6,6 +6,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from app.ai.service.ai_service import AIService
 from app.chat.repository.chat_repository import ChatRepository
 from app.chat.service.chat_service import ChatService
+from app.file.repository.index_job_repository import IndexJobRepository
 from app.file.repository.file_repository import FileRepository
 from app.file.service.file_service import FileService
 from app.message.repository.message_repository import MessageRepository
@@ -48,19 +49,21 @@ class Container(containers.DeclarativeContainer):
         db_config=db_config,
     )
 
+    index_job_repository = providers.Singleton(
+        IndexJobRepository,
+        db_config=db_config,
+    )
+
     message_repository = providers.Singleton(
         MessageRepository,
         db_config=db_config,
     )
 
-    chat_service = providers.Singleton(
-        ChatService,
-        chat_repository=chat_repository,
-    )
-
     file_service = providers.Singleton(
         FileService,
+        chat_repository=chat_repository,
         file_repository=file_repository,
+        index_job_repository=index_job_repository,
         text_specifier=text_specifier,
         vector_store=vector_store,
     )
@@ -68,6 +71,14 @@ class Container(containers.DeclarativeContainer):
     message_service = providers.Singleton(
         MessageService,
         message_repository=message_repository
+    )
+
+    chat_service = providers.Singleton(
+        ChatService,
+        chat_repository=chat_repository,
+        file_service=file_service,
+        message_service=message_service,
+        index_job_repository=index_job_repository,
     )
 
     ai_service = providers.Singleton(

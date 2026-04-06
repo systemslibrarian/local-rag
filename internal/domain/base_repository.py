@@ -33,7 +33,9 @@ class BaseRepository(Generic[T]):
             raise ValueError(f"Entity with id {entity_id} not found")
         return entity
 
-    async def all(self, conditions: dict = {}) -> Sequence[T]:
+    async def all(self, conditions: dict | None = None) -> Sequence[T]:
+        if conditions is None:
+            conditions = {}
         async with self.db_config.getSession() as session:
             stmt = select(self.model_class).filter_by(**conditions)
             result = await session.execute(stmt)
@@ -41,8 +43,11 @@ class BaseRepository(Generic[T]):
 
     async def update(self, entity_id: uuid.UUID, data: dict[str, Any]) -> T|None:
         async with self.db_config.getSession() as session:
-            entity = await self.get_by_id(entity_id=entity_id)
-
+            stmt = select(self.model_class).filter_by(id=entity_id)
+            result = await session.execute(stmt)
+            entity = result.scalars().first()
+            if entity is None:
+                raise ValueError(f"Entity with id {entity_id} not found")
             for key, value in data.items():
                 setattr(entity, key, value)
             await session.flush()
@@ -51,8 +56,11 @@ class BaseRepository(Generic[T]):
 
     async def delete(self, entity_id: uuid.UUID) -> bool:
         async with self.db_config.getSession() as session:
-            entity = await self.get_by_id(entity_id=entity_id)
-
+            stmt = select(self.model_class).filter_by(id=entity_id)
+            result = await session.execute(stmt)
+            entity = result.scalars().first()
+            if entity is None:
+                raise ValueError(f"Entity with id {entity_id} not found")
             await session.delete(entity)
             await session.flush()
             return True

@@ -29,9 +29,6 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('name')
     )
-    op.drop_index(op.f('ix_cmetadata_gin'), table_name='langchain_pg_embedding', postgresql_using='gin')
-    op.drop_table('langchain_pg_embedding')
-    op.drop_table('langchain_pg_collection')
     # ### end Alembic commands ###
 
 

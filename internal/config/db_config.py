@@ -2,7 +2,6 @@ from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
 
 class DBConfig:
     conn = None
@@ -18,7 +17,6 @@ class DBConfig:
             self.database_url,
             echo=False,
             pool_pre_ping=True,
-            poolclass=StaticPool,
         )
 
         self.async_session_factory = async_sessionmaker(
@@ -36,8 +34,6 @@ class DBConfig:
             except Exception:
                 await session.rollback()
                 raise
-            finally:
-                await session.close()
 
     async def close(self) -> None:
         if self.engine is not None:

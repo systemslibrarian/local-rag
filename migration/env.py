@@ -3,7 +3,7 @@ import pkgutil
 from logging.config import fileConfig
 
 from alembic import context
-from mypy.moduleinspect import ModuleType
+from types import ModuleType
 from sqlalchemy import engine_from_config, pool, TypeDecorator, String
 
 import app

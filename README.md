@@ -1,82 +1,167 @@
-# Local RAG Application
+# Local RAG
 
-A Streamlit-based Retrieval-Augmented Generation (RAG) application that allows you to interact with your documents using natural language queries. The application uses local language models and vector databases for private, offline document processing and question-answering.
+A fully **private, offline** Retrieval-Augmented Generation (RAG) application built with Streamlit, LangChain, PGVector, and Ollama. Upload PDF documents, ask questions in natural language, and receive **cited, grounded answers** — all without sending a single byte to the cloud.
 
-## Local RAG
-- LLM Models: **llama3.2**
-- LLM Embedding Model: **nomic-embed-text**
+---
+
 ## Features
 
-- **Document Processing**: Upload and process various document formats
-- **Vector Database**: Local vector storage for efficient document retrieval
-- **Natural Language Queries**: Ask questions in natural language about your documents
-- **Offline-First**: All processing happens locally on your machine
-- **Web Interface**: User-friendly Streamlit interface for easy interaction
+| Category | Details |
+|---|---|
+| **Document ingestion** | Upload PDFs, background indexing with real-time job status panel |
+| **Cited answers** | Every response includes file name, page number, and excerpt from the source |
+| **No-evidence guard** | Similarity threshold prevents the LLM from hallucinating when content is irrelevant |
+| **Multi-query retrieval** | Generates multiple query variants for better recall (toggleable) |
+| **Chat management** | Create, rename, search, and sort chats; cascade-delete cleans all data |
+| **Document management** | Re-index or delete individual files with full vector cleanup |
+| **Retrieval settings** | Per-chat sliders: Top-K chunks, citation limit, multi-query toggle |
+| **Export** | Download any conversation as a Markdown file |
+| **Startup health checks** | Validates DB connectivity, Ollama availability, and temp folder on launch |
+| **Structured JSON logging** | Latency metrics around retrieval, embedding, and generation |
+| **Accessibility** | WCAG AA contrast ratios, `role="log"` live region, keyboard focus rings, `aria-hidden` on decorative elements |
+| **Mobile-friendly** | Responsive CSS with `@media` breakpoints for narrow viewports |
+
+---
+
+## Models
+
+| Purpose | Default model |
+|---|---|
+| LLM | `llama3.2` |
+| Embeddings | `nomic-embed-text` |
+
+Change both in `.env` — no code changes needed.
+
+---
 
 ## Prerequisites
 
-- Python 3.13+
-- pip (Python package manager)
-- Git (for cloning the repository)
+- Python **3.12+**
+- [Ollama](https://ollama.com) running locally (`http://localhost:11434`)
+- PostgreSQL with the **pgvector** extension enabled
+- `pip` / `venv`
+
+### Pull required Ollama models
+
+```bash
+ollama pull llama3.2
+ollama pull nomic-embed-text
+```
+
+### Enable pgvector in PostgreSQL
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+```
+
+---
 
 ## Installation
 
-1. Clone the repository:
-   ```bash
-   git clone <repository-url>
-   cd local-rag
-   ```
+```bash
+# 1. Clone
+git clone https://github.com/dbunt1tled/local-rag.git
+cd local-rag
 
-2. Create and activate a virtual environment (recommended):
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows use `venv\Scripts\activate`
-   ```
+# 2. Create virtual environment
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
 
-3. Install the required dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+# 3. Install dependencies
+pip install -r requirements.txt
+```
+
+---
 
 ## Configuration
 
-1. Copy the example environment file and update it with your configuration:
-   ```bash
-   cp .env.example .env
-   ```
+Copy and edit the environment file:
 
-2. Edit the `.env` file with your preferred settings.
+```bash
+cp .env .env.local   # or just edit .env in-place
+```
 
-## Usage
+| Variable | Description | Default |
+|---|---|---|
+| `PG_DSN` | PostgreSQL connection string | `postgresql+psycopg://user:password@localhost:5432/db` |
+| `COLLECTION_NAME` | PGVector collection name | `local-rag` |
+| `LLM_MODEL` | Ollama chat model | `llama3.2` |
+| `TEXT_EMBEDDING_MODEL` | Ollama embedding model | `nomic-embed-text` |
+| `OLLAMA_HOST` | Ollama base URL | `http://localhost:11434` |
+| `TEMP_FOLDER` | Scratch folder for PDF processing | `/tmp/local-rag` |
 
-1. Start the Streamlit application:
-   ```bash
-   streamlit run Home.py
-   ```
+---
 
-2. Open your web browser and navigate to `http://localhost:8501`
+## Database setup
 
-3. Upload your documents and start querying!
+Run Alembic migrations before first launch:
 
-## Project Structure
+```bash
+alembic upgrade head
+```
+
+---
+
+## Running
+
+```bash
+streamlit run Home.py
+```
+
+Open **http://localhost:8501** in your browser.
+
+---
+
+## Project structure
 
 ```
-.
-├── app/                    # Main application package
-│   ├── message/            # Message handling components
-│   └── ...                 # Other application modules
-├── internal/               # Internal application code
-├── migration/              # Database migration scripts
-├── .env                    # Environment variables
-├── .gitignore             # Git ignore file
-├── alembic.ini            # Alembic configuration
-├── app.py                 # Main application entry point
-├── pyproject.toml         # Python project configuration
-├── README.md              # This file
-└── requirements.txt       # Project dependencies
+local-rag/
+├── Home.py                         # Streamlit entrypoint + health checks
+├── app/
+│   ├── ai/                         # LLM query, retrieval, citations
+│   ├── chat/                       # Chat CRUD, rename, cascade delete
+│   ├── file/                       # File upload, background indexing, vector management
+│   │   └── model/index_job.py      # Persistent indexing job records
+│   └── message/                    # Message storage and rendering
+├── internal/
+│   ├── config/
+│   │   ├── setting.py              # Pydantic settings from .env
+│   │   └── logging_config.py       # Structured JSON logging + timed() helper
+│   ├── di/container.py             # dependency-injector wiring
+│   └── domain/                     # Base repository and entity classes
+├── migration/                      # Alembic migrations
+│   └── versions/
+├── alembic.ini
+├── pyproject.toml
+└── requirements.txt
 ```
+
+---
+
+## Architecture overview
+
+```
+User → Streamlit UI
+         │
+         ├── FileService ──► PyPDFLoader → TextSplitter → PGVector (embeddings)
+         │       └── IndexJobRepository (tracks background jobs in DB)
+         │
+         └── AIService ──► similarity_search_with_relevance_scores
+                  │              (threshold filter → no-hallucination guard)
+                  ├── MultiQueryRetriever (optional)
+                  └── ChatOllama → cited AIAnswer
+```
+
+---
 
 ## Contributing
+
+Pull requests are welcome. Please open an issue first to discuss significant changes.
+
+## License
+
+MIT
+
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 

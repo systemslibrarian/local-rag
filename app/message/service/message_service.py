@@ -19,7 +19,9 @@ class MessageService:
         )
         return await self.message_repository.create(chat)
 
-    async def all(self, conditions: dict = {}) -> Sequence[Message]:
+    async def all(self, conditions: dict | None = None) -> Sequence[Message]:
+        if conditions is None:
+            conditions = {}
         return await self.message_repository.all(conditions=conditions)
 
     async def get_by_id(self, message_id: uuid.UUID) -> Message:
@@ -27,4 +29,12 @@ class MessageService:
 
     async def delete(self, message_id: uuid.UUID) -> bool:
         return await self.message_repository.delete(message_id)
+
+    async def delete_by_chat(self, chat_id: uuid.UUID) -> int:
+        messages = await self.all(conditions={"chat_id": chat_id})
+        deleted = 0
+        for message in messages:
+            await self.delete(message.id)
+            deleted += 1
+        return deleted
 

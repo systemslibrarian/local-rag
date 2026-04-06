@@ -36,7 +36,7 @@ class MessageCreate(MessageBase):
 class MessageUpdate(MessageBase):
     text: str|None = Field(None, min_length=3, max_length=3000)
 
-class ChatResponse(MessageBase):
+class MessageResponse(MessageBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID4
