@@ -19,7 +19,7 @@ class Message(Entity):
     )
     text: Mapped[str] = mapped_column(Text(), nullable=False)
     chat_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    type: Mapped[MessageType] = mapped_column(Enum(MessageType), default=MessageType.USER, nullable=False, index=True)
+    type: Mapped[MessageType] = mapped_column(Enum(MessageType, values_callable=lambda x: [e.name for e in x]), default=MessageType.USER, nullable=False, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
