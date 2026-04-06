@@ -76,7 +76,6 @@ async def main() -> None:
             'About': "# This is a header. This is an *extremely* cool app!"
         }
     )
-    st.title("Welcome to Local RAG! 👋")
     query_params = st.query_params
     di = get_container()
     health = await get_system_health(di)

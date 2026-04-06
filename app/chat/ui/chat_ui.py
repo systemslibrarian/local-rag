@@ -32,19 +32,9 @@ class ChatUI:
         messages = await message_service.all(conditions={"chat_id": chat_id})
         jobs = await file_service.list_jobs(chat_id)
         active_jobs = sum(1 for job in jobs if job.status in {"queued", "running"})
-        st.title(f"💬 {chat.name}")
-        st.markdown("---")
 
         with st.sidebar:
-            st.subheader("Workspace")
-            metric_col1, metric_col2 = st.columns(2)
-            with metric_col1:
-                st.metric("Docs", len(files))
-                st.metric("Jobs", len(jobs))
-            with metric_col2:
-                st.metric("Messages", len(messages))
-                st.metric("Active", active_jobs)
-            st.markdown("---")
+            st.caption(f"**💬 {chat.name}** · {len(files)} docs · {len(messages)} msgs · {active_jobs} active")
 
             await FileUI.view(
                 chat_id=chat_id,
@@ -53,7 +43,6 @@ class ChatUI:
 
             # --- Export conversation ---
             if messages:
-                st.markdown("---")
                 st.subheader("📥 Export")
                 md_lines = [f"# {chat.name}\n"]
                 for msg in messages:
@@ -70,14 +59,6 @@ class ChatUI:
                     use_container_width=True,
                 )
 
-            st.subheader("🔧 Chat Available:")
-            st.markdown("""
-            - 📎 Upload PDF files
-            - 🔍 Automated content analysis
-            - 💬 Discussion of file content
-            - 💾 Save chat history
-            """)
-
         await MessageUI.chat(
             chat_id=chat_id,
             message_service=message_service,
@@ -90,13 +71,10 @@ class ChatUI:
     async def list(
         chat_service: ChatService
     ) -> None:
-        st.title("💬 Chat Manager")
-        st.markdown("---")
-
         col1, col2 = st.columns([2, 1])
 
         with col1:
-            st.header("📋 Chats")
+            st.subheader("Chats")
 
             chats = await chat_service.all()
             search_query = st.text_input("Search chats", placeholder="Filter by name")
@@ -129,8 +107,8 @@ class ChatUI:
                         chat_col1, chat_col2, chat_col3, chat_col4 = st.columns([3, 1, 1, 1])
 
                         with chat_col1:
-                            st.subheader(f"💬 {chat.name}")
-                            st.caption(f"Created: {chat.created_at.strftime('%d.%m.%Y %H:%M')}")
+                            st.markdown(f"**💬 {chat.name}**")
+                            st.caption(chat.created_at.strftime('%d.%m.%Y %H:%M'))
 
                         with chat_col2:
                             if st.button("Open", key=f"open_{chat.id}"):
@@ -166,10 +144,8 @@ class ChatUI:
                                             st.toast(f"Renamed chat to '{candidate}'")
                                             st.rerun()
 
-                        st.markdown("---")
-
         with col2:
-            st.header("➕ Create a new chat")
+            st.subheader("New chat")
 
             with st.form("new_chat_form"):
                 chat_name = st.text_input("Name", placeholder="Enter chat name")

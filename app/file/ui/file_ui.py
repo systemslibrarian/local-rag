@@ -54,15 +54,12 @@ class FileUI:
         file_service: FileService
     ) -> None:
         files = await file_service.all(conditions={"chat_id": chat_id})
-        st.header("📁 Upload")
-        st.caption("Upload a PDF to index it for retrieval and cited answers.")
-        if files:
-            st.caption(f"Indexed documents: {len(files)}")
+        st.subheader("📁 Upload")
         with st.form(f"upload_form_{chat_id}"):
             uploaded_file = st.file_uploader(
-                "📎 File",
+                "PDF",
                 type=["pdf"],
-                help="Allowed file types: pdf"
+                label_visibility="collapsed",
             )
             submitted = st.form_submit_button("Start Indexing", type="primary", use_container_width=True)
 
@@ -121,7 +118,6 @@ class FileUI:
                     FileUI.file_preview(file, file_service)
             else:
                 st.info("No documents uploaded yet.")
-        st.markdown("---")
 
     @staticmethod
     def file_preview(
