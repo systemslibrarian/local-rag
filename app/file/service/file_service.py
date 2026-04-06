@@ -1,4 +1,5 @@
 import asyncio
+import threading
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -225,7 +226,8 @@ class FileService:
             pages=0,
             chunks=0,
         ))
-        asyncio.create_task(self._run_upload_job(job.id, pdf_bytes, file_name, chat_id))
+        coro = self._run_upload_job(job.id, pdf_bytes, file_name, chat_id)
+        threading.Thread(target=asyncio.run, args=(coro,), daemon=True).start()
         return job
 
     async def reindex(self, file_id: uuid.UUID) -> UploadResult:
