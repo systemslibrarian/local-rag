@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import UUID, DateTime, String
+from sqlalchemy import UUID, DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
@@ -19,6 +19,7 @@ class File(Entity):
     name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     chat_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     storage_path: Mapped[str] = mapped_column(String(512), nullable=False)
+    chunk_count: Mapped[int] = mapped_column(Integer(), nullable=False, default=0)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 

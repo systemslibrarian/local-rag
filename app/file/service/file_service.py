@@ -52,13 +52,14 @@ class FileService:
 
     async def _load_documents_from_path(self, storage_path: str) -> list[Document]:
         loader = PyPDFLoader(file_path=storage_path)
-        return loader.load()
+        return await loader.aload()
 
     async def _split_file_content(self, file: File) -> tuple[list[Document], list[Document]]:
         data = await self._load_documents_from_path(file.storage_path)
         if not data:
             raise ValueError("No readable text found in the uploaded PDF.")
-        chunks = self.text_specifier.split_documents(data)
+        loop = asyncio.get_event_loop()
+        chunks = await loop.run_in_executor(None, self.text_specifier.split_documents, data)
         if not chunks:
             raise ValueError("No chunks were produced from the uploaded PDF.")
         return data, chunks
@@ -75,17 +76,16 @@ class FileService:
         _log.info("indexing_start", file_name=file.name, pages=len(data), chunks=len(chunks))
         with timed(_log, "embedding", file_name=file.name, chunks=len(chunks)):
             await self.vector_store.aadd_documents(chunks, ids=chunk_ids)
+        # Persist chunk count so delete never needs to re-parse the PDF
+        await self.file_repository.update(file.id, {"chunk_count": len(chunks)})
         _log.info("indexing_done", file_name=file.name, pages=len(data), chunks=len(chunks))
         return len(data), len(chunks)
 
     async def _delete_vectors_for_file(self, file: File) -> None:
-        try:
-            _, chunks = await self._split_file_content(file)
-        except Exception:
+        if not file.chunk_count:
             return
-        chunk_ids = [self.build_chunk_id(file.id, chunk_index) for chunk_index in range(len(chunks))]
-        if chunk_ids:
-            await self.vector_store.adelete(ids=chunk_ids, collection_only=True)
+        chunk_ids = [self.build_chunk_id(file.id, i) for i in range(file.chunk_count)]
+        await self.vector_store.adelete(ids=chunk_ids, collection_only=True)
 
     @staticmethod
     def pdf_to_image(storage_path: str, only_first_page: bool = False) -> list[Image.Image]:
