@@ -1,8 +1,7 @@
 import asyncio
-import os
-import tempfile
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Sequence
 
 from langchain_community.document_loaders import PyPDFLoader
@@ -11,7 +10,6 @@ from langchain_core.vectorstores import VectorStore
 from langchain_text_splitters import TextSplitter
 from pdf2image import convert_from_bytes
 from PIL import Image
-from streamlit.runtime.uploaded_file_manager import UploadedFile
 
 from app.chat.repository.chat_repository import ChatRepository
 from app.file.dto.file_schema import FileCreate
@@ -32,6 +30,7 @@ class UploadResult:
     pages: int
     chunks: int
 
+
 @dataclass
 class FileService:
     chat_repository: ChatRepository
@@ -39,24 +38,23 @@ class FileService:
     index_job_repository: IndexJobRepository
     text_specifier: TextSplitter
     vector_store: VectorStore
+    storage_folder: str = field(default="./data/files")
+
+    def _file_storage_path(self, file_id: uuid.UUID) -> Path:
+        folder = Path(self.storage_folder)
+        folder.mkdir(parents=True, exist_ok=True)
+        return folder / f"{file_id}.pdf"
 
     @staticmethod
     def build_chunk_id(file_id: uuid.UUID, chunk_index: int) -> str:
         return f"{file_id}:{chunk_index}"
 
-    async def _load_documents_from_bytes(self, pdf_bytes: bytes) -> list[Document]:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-            tmp_file.write(pdf_bytes)
-            tmp_file.flush()
-            tmp_file_path = tmp_file.name
-        try:
-            loader = PyPDFLoader(file_path=tmp_file_path)
-            return loader.load()
-        finally:
-            os.unlink(tmp_file_path)
+    async def _load_documents_from_path(self, storage_path: str) -> list[Document]:
+        loader = PyPDFLoader(file_path=storage_path)
+        return loader.load()
 
     async def _split_file_content(self, file: File) -> tuple[list[Document], list[Document]]:
-        data = await self._load_documents_from_bytes(file.content)
+        data = await self._load_documents_from_path(file.storage_path)
         if not data:
             raise ValueError("No readable text found in the uploaded PDF.")
         chunks = self.text_specifier.split_documents(data)
@@ -89,15 +87,23 @@ class FileService:
             await self.vector_store.adelete(ids=chunk_ids, collection_only=True)
 
     @staticmethod
-    def pdf_to_image(pdf_bytes: bytes, only_first_page=False) -> list[Image.Image]:
+    def pdf_to_image(storage_path: str, only_first_page: bool = False) -> list[Image.Image]:
+        with open(storage_path, "rb") as f:
+            pdf_bytes = f.read()
         if only_first_page:
-            images = convert_from_bytes(pdf_bytes, first_page=1, last_page=1)
-        else:
-            images = convert_from_bytes(pdf_bytes)
-        return images
+            return convert_from_bytes(pdf_bytes, first_page=1, last_page=1)
+        return convert_from_bytes(pdf_bytes)
 
     async def create(self, file_create: FileCreate) -> File:
-        f = File(name=file_create.name, chat_id=file_create.chat_id, content=file_create.content)
+        file_id = uuid.uuid4()
+        storage_path = self._file_storage_path(file_id)
+        storage_path.write_bytes(file_create.content)
+        f = File(
+            id=file_id,
+            name=file_create.name,
+            chat_id=file_create.chat_id,
+            storage_path=str(storage_path),
+        )
         return await self.file_repository.create(f)
 
     async def all(self, conditions: dict | None = None) -> Sequence[File]:
@@ -111,6 +117,10 @@ class FileService:
     async def delete(self, file_id: uuid.UUID) -> bool:
         file = await self.get_by_id(file_id)
         await self._delete_vectors_for_file(file)
+        try:
+            Path(file.storage_path).unlink(missing_ok=True)
+        except Exception:
+            pass
         return await self.file_repository.delete(file_id)
 
     async def delete_by_chat(self, chat_id: uuid.UUID) -> int:
@@ -182,13 +192,13 @@ class FileService:
             _log.info("job_done", job_id=str(job_id), file_name=file_name, pages=pages, chunks=chunks)
         except Exception as exc:
             await self.file_repository.delete(file.id)
-            await self._update_job(job_id, status="failed", message=f"Failed to index {file_name}: {exc}")
             _log.error("job_failed", job_id=str(job_id), file_name=file_name, error=str(exc))
+            await self._update_job(job_id, status="failed", message=f"Failed to index {file_name}: {exc}")
 
     async def submit_upload_job(self, file_name: str, pdf_bytes: bytes, chat_id: uuid.UUID) -> IndexJob:
         existing_file = await self.find_by_chat_and_name(chat_id=chat_id, name=file_name)
         if existing_file is not None:
-            job = IndexJob(
+            return IndexJob(
                 chat_id=chat_id,
                 file_name=file_name,
                 status="completed",
@@ -197,9 +207,10 @@ class FileService:
                 pages=0,
                 chunks=0,
             )
-            return job
 
-        active_job = await self.index_job_repository.find_active_by_chat_and_name(chat_id=chat_id, file_name=file_name)
+        active_job = await self.index_job_repository.find_active_by_chat_and_name(
+            chat_id=chat_id, file_name=file_name
+        )
         if active_job is not None:
             return active_job
 
@@ -214,31 +225,6 @@ class FileService:
         asyncio.create_task(self._run_upload_job(job.id, pdf_bytes, file_name, chat_id))
         return job
 
-    async def upload_file(self, u_file: UploadedFile, chat_id: uuid.UUID) -> UploadResult:
-        existing_file = await self.find_by_chat_and_name(chat_id=chat_id, name=u_file.name)
-        if existing_file is not None:
-            return UploadResult(
-                file=existing_file,
-                created=False,
-                message=f"File '{u_file.name}' is already indexed for this chat.",
-                pages=0,
-                chunks=0,
-            )
-
-        file = await self.create(FileCreate(name=u_file.name, chat_id=chat_id, content=u_file.getvalue()))
-        try:
-            pages, chunks = await self._index_file(file)
-            return UploadResult(
-                file=file,
-                created=True,
-                message=f"File '{u_file.name}' indexed successfully.",
-                pages=pages,
-                chunks=chunks,
-            )
-        except Exception:
-            await self.file_repository.delete(file.id)
-            raise
-
     async def reindex(self, file_id: uuid.UUID) -> UploadResult:
         file = await self.get_by_id(file_id)
         await self._delete_vectors_for_file(file)
@@ -250,12 +236,6 @@ class FileService:
             pages=pages,
             chunks=chunks,
         )
-
-    async def search_documents(self, query: str, chat_id: uuid.UUID) -> list[Document]:
-        file_ids = await self.find_files_ids(chat_id=chat_id)
-        if not file_ids:
-            return []
-        return await self.vector_store.asimilarity_search(query, filter={"file_id": {"$in": file_ids}})
 
     async def find_files_ids(self, chat_id: uuid.UUID) -> list[str]:
         files = await self.all(conditions={"chat_id": chat_id})

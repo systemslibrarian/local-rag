@@ -2,10 +2,48 @@ import uuid
 from io import BytesIO
 
 import streamlit as st
-import streamlit.components.v1 as components
 
 from app.file.model.file import File
 from app.file.service.file_service import FileService
+
+
+@st.fragment(run_every="4s")
+async def _jobs_panel(chat_id: uuid.UUID, file_service: FileService) -> None:
+    """Auto-refreshing jobs panel — re-runs every 4 s via st.fragment."""
+    jobs = await file_service.list_jobs(chat_id)
+    has_active = any(j.status in {"queued", "running"} for j in jobs)
+
+    with st.expander("⏱️ Index Jobs", expanded=has_active):
+        if jobs:
+            refresh_col, clear_col, _ = st.columns([1, 1, 2])
+            with refresh_col:
+                if st.button("Refresh", key=f"refresh_jobs_{chat_id}", use_container_width=True):
+                    st.rerun()
+            with clear_col:
+                if st.button("Clear", key=f"clear_jobs_{chat_id}", use_container_width=True):
+                    deleted = await file_service.clear_finished_jobs(chat_id)
+                    if deleted:
+                        st.toast(f"Cleared {deleted} finished jobs")
+                    st.rerun()
+            for job in jobs:
+                label = f"{job.file_name} · {job.status}"
+                if job.status == "completed":
+                    st.success(f"{label} — {job.message}")
+                    if job.chunks:
+                        st.caption(
+                            f"{job.pages} pages · {job.chunks} chunks · "
+                            f"updated {job.updated_at.strftime('%H:%M:%S')}"
+                        )
+                elif job.status == "failed":
+                    st.error(f"{label} — {job.message}")
+                elif job.status == "running":
+                    st.warning(f"{label} — {job.message}")
+                else:
+                    st.info(f"{label} — {job.message}")
+            if has_active:
+                st.caption("Updating automatically while jobs are running.")
+        else:
+            st.info("No indexing jobs yet.")
 
 
 class FileUI:
@@ -16,8 +54,6 @@ class FileUI:
         file_service: FileService
     ) -> None:
         files = await file_service.all(conditions={"chat_id": chat_id})
-        jobs = await file_service.list_jobs(chat_id)
-        has_active_jobs = await file_service.has_active_jobs(chat_id)
         st.header("📁 Upload")
         st.caption("Upload a PDF to index it for retrieval and cited answers.")
         if files:
@@ -45,48 +81,8 @@ class FileUI:
                     st.toast(f"Started indexing {uploaded_file.name}")
                     st.rerun()
 
-        with st.expander("⏱️ Index Jobs", expanded=has_active_jobs):
-            if jobs:
-                refresh_col, clear_col, _ = st.columns([1, 1, 2])
-                with refresh_col:
-                    if st.button("Refresh", key=f"refresh_jobs_{chat_id}", use_container_width=True):
-                        st.rerun()
-                with clear_col:
-                    if st.button("Clear", key=f"clear_jobs_{chat_id}", use_container_width=True):
-                        deleted = await file_service.clear_finished_jobs(chat_id)
-                        if deleted:
-                            st.toast(f"Cleared {deleted} finished jobs")
-                        st.rerun()
-                for job in jobs:
-                    label = f"{job.file_name} · {job.status}"
-                    if job.status == "completed":
-                        st.success(f"{label} — {job.message}")
-                        if job.chunks:
-                            st.caption(f"{job.pages} pages · {job.chunks} chunks · updated {job.updated_at.strftime('%H:%M:%S')}")
-                    elif job.status == "failed":
-                        st.error(f"{label} — {job.message}")
-                    elif job.status == "running":
-                        st.warning(f"{label} — {job.message}")
-                    else:
-                        st.info(f"{label} — {job.message}")
-                if has_active_jobs:
-                    st.caption("Updating automatically while jobs are running.")
-                    components.html(
-                        """
-                        <script>
-                            const timer = setTimeout(() => {
-                                const parentWindow = window.parent;
-                                if (parentWindow) {
-                                    parentWindow.location.reload();
-                                }
-                            }, 4000);
-                        </script>
-                        """,
-                        height=0,
-                        width=0,
-                    )
-            else:
-                st.info("No indexing jobs yet.")
+        # Jobs panel — auto-refreshes every 4 s via st.fragment (no JS reload)
+        _jobs_panel(chat_id=chat_id, file_service=file_service)
 
         with st.expander("🗂️ Manage Documents", expanded=bool(files)):
             if files:
@@ -133,7 +129,7 @@ class FileUI:
             file_service: FileService
     ) -> None:
         try:
-            img = file_service.pdf_to_image(file.content, only_first_page=True)
+            img = file_service.pdf_to_image(file.storage_path, only_first_page=True)
             if img and img[0].width > 0 and img[0].height > 0:
                 img_byte_arr = BytesIO()
                 img[0].save(img_byte_arr, format='JPEG')
@@ -143,3 +139,4 @@ class FileUI:
                 st.info(f"📄 {file.name} (preview not available)")
         except Exception:
             st.info(f"📄 {file.name} (preview not available)")
+

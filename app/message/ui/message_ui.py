@@ -4,12 +4,16 @@ import uuid
 import streamlit as st
 import streamlit.components.v1 as components
 
-from app.ai.dto.ai_schema import AIAnswer
+from app.ai.dto.ai_schema import AIAnswer, Citation
 from app.ai.service.ai_service import AIService
 from app.file.service.file_service import FileService
 from app.message.dto.message_enum import MessageType
 from app.message.dto.message_schema import MessageCreate
 from app.message.service.message_service import MessageService
+from internal.config.setting import setting
+
+# Number of previous (human, AI) exchange pairs to include as context
+_HISTORY_WINDOW = setting.history_window
 
 
 class MessageUI:
@@ -46,29 +50,47 @@ class MessageUI:
                 chat_create=MessageCreate(
                     text=prompt,
                     chat_id=chat_id,
-                    type=MessageType.USER
+                    type=MessageType.USER,
                 )
             )
             st.session_state.input_key += 1
-            with st.spinner("writing..."):
-                try:
-                    answer = await ai_service.query(
-                        query=prompt,
-                        chat_id=chat_id,
-                        top_k=st.session_state.retrieval_top_k,
-                        citation_limit=st.session_state.citation_limit,
-                        use_multi_query=st.session_state.use_multi_query,
-                    )
-                except Exception:
-                    answer = AIAnswer(answer="Sorry, I couldn't process your request. Please try again.")
-                await message_service.create(
-                    chat_create=MessageCreate(
-                        text=MessageUI.format_ai_answer(answer),
-                        chat_id=chat_id,
-                        type=MessageType.SYSTEM
-                    )
+
+            # Build conversation history (last N pairs before the current question)
+            all_messages = list(await message_service.all(conditions={"chat_id": chat_id}))
+            history = MessageUI._build_history(all_messages[:-1])  # exclude just-saved user msg
+
+            # --- Streaming response ---
+            placeholder = st.empty()
+            streamed_text = ""
+            citations: list[Citation] = []
+            try:
+                async for item in ai_service.stream_query(
+                    query=prompt,
+                    chat_id=chat_id,
+                    history=history,
+                    top_k=st.session_state.retrieval_top_k,
+                    citation_limit=st.session_state.citation_limit,
+                    use_multi_query=st.session_state.use_multi_query,
+                ):
+                    if isinstance(item, list):
+                        citations = item
+                    else:
+                        streamed_text += item
+                        placeholder.markdown(streamed_text + " ▌")
+            except Exception:
+                streamed_text = "Sorry, I couldn't process your request. Please try again."
+            placeholder.markdown(streamed_text)
+
+            answer = AIAnswer(answer=streamed_text, citations=citations)
+            await message_service.create(
+                chat_create=MessageCreate(
+                    text=MessageUI.format_ai_answer(answer),
+                    chat_id=chat_id,
+                    type=MessageType.SYSTEM,
                 )
+            )
             st.rerun()
+
         components.html("""
         <script>
             function scrollToBottom() {
@@ -78,6 +100,33 @@ class MessageUI:
                 }
             }
             setTimeout(scrollToBottom, 300);
+        </script>
+        """, height=0, width=0)
+
+    @staticmethod
+    def _build_history(messages: list) -> list[tuple[str, str]]:
+        """Return the last _HISTORY_WINDOW (human, ai) pairs from a message list."""
+        pairs: list[tuple[str, str]] = []
+        i = len(messages) - 1
+        while i >= 1 and len(pairs) < _HISTORY_WINDOW // 2:
+            if (
+                messages[i].type == MessageType.SYSTEM
+                and messages[i - 1].type == MessageType.USER
+            ):
+                # Strip the "Sources:" section so history context stays clean
+                ai_text = MessageUI._strip_sources_section(messages[i].text)
+                pairs.insert(0, (messages[i - 1].text, ai_text))
+                i -= 2
+            else:
+                i -= 1
+        return pairs
+
+    @staticmethod
+    def _strip_sources_section(text: str) -> str:
+        idx = text.find("\n\nSources:")
+        return text[:idx] if idx != -1 else text
+
+
         </script>
         """, height=0, width=0)
 

@@ -1,0 +1,62 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: local_rag
+      POSTGRES_PASSWORD: local_rag
+      POSTGRES_DB: local_rag
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U local_rag"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    # Pull required models on first start
+    entrypoint: >
+      bash -c "ollama serve &
+               sleep 5 &&
+               ollama pull llama3.2 &&
+               ollama pull nomic-embed-text &&
+               wait"
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8501:8501"
+    environment:
+      PG_DSN: postgresql+psycopg://local_rag:local_rag@postgres:5432/local_rag
+      OLLAMA_HOST: http://ollama:11434
+      LLM_MODEL: ${LLM_MODEL:-llama3.2}
+      TEXT_EMBEDDING_MODEL: ${TEXT_EMBEDDING_MODEL:-nomic-embed-text}
+      COLLECTION_NAME: ${COLLECTION_NAME:-local-rag}
+      TEMP_FOLDER: /tmp/local-rag
+      FILE_STORAGE_FOLDER: /app/data/files
+      SIMILARITY_THRESHOLD: ${SIMILARITY_THRESHOLD:-0.30}
+      HISTORY_WINDOW: ${HISTORY_WINDOW:-6}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-10}
+    volumes:
+      - file_data:/app/data/files
+
+volumes:
+  postgres_data:
+  ollama_data:
+  file_data:

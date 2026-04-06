@@ -292,3 +292,7 @@ xxhash==3.5.0
 yarl==1.20.0
 zipp==3.22.0
 zstandard==0.23.0
+
+# Testing
+pytest>=8.0
+pytest-asyncio>=0.24

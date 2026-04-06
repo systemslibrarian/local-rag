@@ -18,7 +18,12 @@ from internal.config.setting import setting
 class Container(containers.DeclarativeContainer):
     config = providers.Configuration()
 
-    db_config = providers.Singleton(DBConfig, dsn=setting.pg_dsn)
+    db_config = providers.Singleton(
+        DBConfig,
+        dsn=setting.pg_dsn,
+        pool_size=setting.db_pool_size,
+        max_overflow=setting.db_max_overflow,
+    )
 
     text_specifier = providers.Object(RecursiveCharacterTextSplitter(
         chunk_size=1000,
@@ -66,6 +71,7 @@ class Container(containers.DeclarativeContainer):
         index_job_repository=index_job_repository,
         text_specifier=text_specifier,
         vector_store=vector_store,
+        storage_folder=setting.file_storage_folder,
     )
 
     message_service = providers.Singleton(
