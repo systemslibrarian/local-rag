@@ -7,6 +7,7 @@ from app.chat.dto.chat_schema import ChatCreate, ChatUpdate
 from app.chat.service.chat_service import ChatService
 from app.file.service.file_service import FileService
 from app.file.ui.file_ui import FileUI
+from app.message.dto.message_enum import MessageType
 from app.message.service.message_service import MessageService
 from app.message.ui.message_ui import MessageUI
 
@@ -57,7 +58,7 @@ class ChatUI:
                 md_lines = [f"# {chat.name}\n"]
                 for msg in messages:
                     ts = msg.created_at.strftime("%Y-%m-%d %H:%M")
-                    label = "**You**" if msg.type.value == "user" else "**Assistant**"
+                    label = "**You**" if msg.type == MessageType.USER else "**Assistant**"
                     md_lines.append(f"### {label}  \n_{ts}_\n\n{msg.text}\n")
                 md_export = "\n---\n\n".join(md_lines)
                 safe_name = "".join(c if c.isalnum() or c in "-_ " else "_" for c in chat.name)

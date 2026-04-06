@@ -101,7 +101,7 @@ class AIService:
         threshold = setting.similarity_threshold
         scored = await self.db.asimilarity_search_with_relevance_scores(
             query,
-            k=top_k,
+            k=max(top_k * 4, 20),
             filter={"file_id": {"$in": file_ids}},
         )
         passed = [(doc, score) for doc, score in scored if score >= threshold]
@@ -135,34 +135,37 @@ class AIService:
             return
 
         # --- Relevance gate ---
+        relevant_docs: list[Document] = []
+        documents: list[Document] = []
         try:
             with timed(_log, "retrieval", chat_id=str(chat_id), top_k=top_k, multi_query=use_multi_query):
                 relevant_docs = await self._score_filter(query, file_ids, top_k)
-                if not relevant_docs:
-                    _log.info("no_evidence", chat_id=str(chat_id))
-                    yield "I could not find relevant information in the uploaded documents for your question."
-                    yield []
-                    return
-
-                if use_multi_query:
-                    base_retriever = self.db.as_retriever(
-                        search_kwargs={
-                            "filter": {"file_id": {"$in": file_ids}},
-                            "k": top_k,
-                        }
-                    )
-                    retriever = MultiQueryRetriever.from_llm(
-                        base_retriever, self.llm, prompt=query_prompt,
-                    )
-                    mq_docs = await retriever.ainvoke(query)
-                    seen_ids = {id(d) for d in relevant_docs}
-                    extra = [d for d in mq_docs if id(d) not in seen_ids]
-                    documents = (relevant_docs + extra)[:top_k]
-                else:
-                    documents = relevant_docs
+                if relevant_docs:
+                    if use_multi_query:
+                        base_retriever = self.db.as_retriever(
+                            search_kwargs={
+                                "filter": {"file_id": {"$in": file_ids}},
+                                "k": top_k,
+                            }
+                        )
+                        retriever = MultiQueryRetriever.from_llm(
+                            base_retriever, self.llm, prompt=query_prompt,
+                        )
+                        mq_docs = await retriever.ainvoke(query)
+                        seen_ids = {(d.metadata.get("file_id"), d.metadata.get("chunk_index")) for d in relevant_docs}
+                        extra = [d for d in mq_docs if (d.metadata.get("file_id"), d.metadata.get("chunk_index")) not in seen_ids]
+                        documents = (relevant_docs + extra)[:top_k]
+                    else:
+                        documents = relevant_docs
         except Exception as exc:
             _log.error("retrieval_error", error=str(exc), chat_id=str(chat_id))
             yield "I couldn't complete the retrieval step. Please check Ollama and try again."
+            yield []
+            return
+
+        if not relevant_docs:
+            _log.info("no_evidence", chat_id=str(chat_id))
+            yield "I could not find relevant information in the uploaded documents for your question."
             yield []
             return
 
@@ -175,14 +178,12 @@ class AIService:
         try:
             context = self._format_context(documents, top_k)
             chain = _PROMPT | self.llm | StrOutputParser()
-            full_text = ""
             with timed(_log, "generation", chat_id=str(chat_id), num_docs=len(documents)):
                 async for chunk in chain.astream({
                     "context": context,
                     "question": query,
                     "history": history_messages,
                 }):
-                    full_text += chunk
                     yield chunk
 
             citations = self._build_citations(documents, citation_limit)

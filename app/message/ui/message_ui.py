@@ -108,7 +108,7 @@ class MessageUI:
         """Return the last _HISTORY_WINDOW (human, ai) pairs from a message list."""
         pairs: list[tuple[str, str]] = []
         i = len(messages) - 1
-        while i >= 1 and len(pairs) < _HISTORY_WINDOW // 2:
+        while i >= 1 and len(pairs) < _HISTORY_WINDOW:
             if (
                 messages[i].type == MessageType.SYSTEM
                 and messages[i - 1].type == MessageType.USER
@@ -125,10 +125,6 @@ class MessageUI:
     def _strip_sources_section(text: str) -> str:
         idx = text.find("\n\nSources:")
         return text[:idx] if idx != -1 else text
-
-
-        </script>
-        """, height=0, width=0)
 
     @staticmethod
     async def list_html(

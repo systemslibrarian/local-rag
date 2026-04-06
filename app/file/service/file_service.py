@@ -191,7 +191,10 @@ class FileService:
             )
             _log.info("job_done", job_id=str(job_id), file_name=file_name, pages=pages, chunks=chunks)
         except Exception as exc:
-            await self.file_repository.delete(file.id)
+            try:
+                await self.delete(file.id)
+            except Exception:
+                pass
             _log.error("job_failed", job_id=str(job_id), file_name=file_name, error=str(exc))
             await self._update_job(job_id, status="failed", message=f"Failed to index {file_name}: {exc}")
 
