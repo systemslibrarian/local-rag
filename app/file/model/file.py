@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import UUID, DateTime, Integer, String
+from sqlalchemy import UUID, DateTime, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
@@ -10,6 +10,7 @@ from internal.domain.entity import Entity
 
 class File(Entity):
     __tablename__ = "files"
+    __table_args__ = (UniqueConstraint("chat_id", "name", name="uq_files_chat_id_name"),)
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),

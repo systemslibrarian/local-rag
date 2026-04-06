@@ -11,6 +11,7 @@ from langchain_core.vectorstores import VectorStore
 from langchain_text_splitters import TextSplitter
 from pdf2image import convert_from_bytes
 from PIL import Image
+from sqlalchemy.exc import IntegrityError
 
 from app.chat.repository.chat_repository import ChatRepository
 from app.file.dto.file_schema import FileCreate
@@ -178,7 +179,17 @@ class FileService:
             )
             return
 
-        file = await self.create(FileCreate(name=file_name, chat_id=chat_id, content=pdf_bytes))
+        try:
+            file = await self.create(FileCreate(name=file_name, chat_id=chat_id, content=pdf_bytes))
+        except IntegrityError:
+            existing_file = await self.find_by_chat_and_name(chat_id=chat_id, name=file_name)
+            await self._update_job(
+                job_id,
+                status="completed",
+                file_id=existing_file.id if existing_file else None,
+                message=f"File '{file_name}' is already indexed for this chat.",
+            )
+            return
         try:
             with timed(_log, "job_index", job_id=str(job_id), file_name=file_name):
                 pages, chunks = await self._index_file(file)
@@ -227,7 +238,14 @@ class FileService:
             chunks=0,
         ))
         coro = self._run_upload_job(job.id, pdf_bytes, file_name, chat_id)
-        threading.Thread(target=asyncio.run, args=(coro,), daemon=True).start()
+
+        def _run_in_thread() -> None:
+            try:
+                asyncio.run(coro)
+            except Exception as exc:
+                _log.error("background_job_crashed", job_id=str(job.id), error=str(exc))
+
+        threading.Thread(target=_run_in_thread, daemon=True).start()
         return job
 
     async def reindex(self, file_id: uuid.UUID) -> UploadResult:

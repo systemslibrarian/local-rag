@@ -1,6 +1,7 @@
 import uuid
 
 import streamlit as st
+from sqlalchemy.exc import IntegrityError
 
 from app.ai.service.ai_service import AIService
 from app.chat.dto.chat_schema import ChatCreate, ChatUpdate
@@ -44,12 +45,12 @@ class ChatUI:
             # --- Export conversation ---
             if messages:
                 st.subheader("📥 Export")
-                md_lines = [f"# {chat.name}\n"]
+                md_lines = []
                 for msg in messages:
                     ts = msg.created_at.strftime("%Y-%m-%d %H:%M")
                     label = "**You**" if msg.type == MessageType.USER else "**Assistant**"
                     md_lines.append(f"### {label}  \n_{ts}_\n\n{msg.text}\n")
-                md_export = "\n---\n\n".join(md_lines)
+                md_export = f"# {chat.name}\n\n" + "\n---\n\n".join(md_lines)
                 safe_name = "".join(c if c.isalnum() or c in "-_ " else "_" for c in chat.name)
                 st.download_button(
                     label="Download conversation (.md)",
@@ -135,14 +136,13 @@ class ChatUI:
                                     elif candidate == chat.name:
                                         st.info("Chat name is unchanged")
                                     else:
-                                        existing = await chat_service.find_by_name(candidate)
-                                        if existing is not None and existing.id != chat.id:
-                                            st.error(f"Chat '{candidate}' already exists. Please choose a different name.")
-                                        else:
+                                        try:
                                             await chat_service.rename(chat.id, ChatUpdate(name=candidate))
                                             st.session_state[f"rename_chat_{chat.id}"] = False
                                             st.toast(f"Renamed chat to '{candidate}'")
                                             st.rerun()
+                                        except (IntegrityError, ValueError):
+                                            st.error(f"Chat '{candidate}' already exists. Please choose a different name.")
 
         with col2:
             st.subheader("New chat")
@@ -151,12 +151,11 @@ class ChatUI:
                 chat_name = st.text_input("Name", placeholder="Enter chat name")
                 if st.form_submit_button("Submit", type="primary"):
                     if chat_name:
-                        existing = await chat_service.find_by_name(chat_name)
-                        if existing is not None:
-                            st.error(f"Chat '{chat_name}' already exists. Please choose a different name.")
-                        else:
+                        try:
                             await chat_service.create(ChatCreate(name=chat_name))
                             st.toast(f"Chat '{chat_name}' created!")
                             st.rerun()
+                        except (IntegrityError, ValueError):
+                            st.error(f"Chat '{chat_name}' already exists. Please choose a different name.")
                     else:
                         st.error("Enter chat name")
